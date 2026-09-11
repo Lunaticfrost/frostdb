@@ -142,13 +142,36 @@ go test -bench=. -benchmem ./internal/engine
 go fmt ./...
 ```
 
+### As a Redis-Compatible Server
+
+FrostDB can run as a standalone TCP network daemon speaking standard Redis (RESP2):
+
+```bash
+# Launch server on port 7379 with disk persistence
+./frostdb -l :7379 -d ./frostdata
+```
+
+Connect using standard Redis tooling and SDKs:
+
+```bash
+# Using redis-cli
+redis-cli -p 7379 PING
+# Output: PONG
+
+redis-cli -p 7379 SET user:101 "Alice"
+# Output: OK
+
+redis-cli -p 7379 GET user:101
+# Output: "Alice"
+```
+
 ## Roadmap
 
 - [x] **Phase 1: In-memory KV Store** — Concurrent read/write primitives, test suite, and REPL CLI.
 - [x] **Phase 2: Persistence Engine** — WAL with binary record framing, CRC32 verification, configurable `fsync` policies, and automatic crash recovery.
 - [x] **Phase 3: Compaction & Space Reclamation** — Atomic log compaction, dead space recovery, and `COMPACT` CLI command.
 - [x] **Phase 4: Public API & Byte Slices** — Root package API (`import "github.com/Lunaticfrost/frostdb"`), binary-safe `[]byte` values, atomic `WriteBatch`, and process file locking (`flock`).
-- [ ] **Phase 5: Client/Server Mode** — Optional standalone server speaking the Redis (RESP) protocol.
+- [x] **Phase 5: Client/Server Mode** — Standalone TCP server with streaming Redis (RESP2) protocol compatibility.
 
 ## License
 
