@@ -4,6 +4,7 @@ package frostdb
 
 import (
 	"github.com/Lunaticfrost/frostdb/internal/engine"
+	"github.com/Lunaticfrost/frostdb/internal/server"
 )
 
 // Re-export core types
@@ -68,3 +69,12 @@ func New() *DB {
 func NewWriteBatch() *WriteBatch {
 	return engine.NewWriteBatch()
 }
+
+// Server represents a Redis RESP-compatible TCP server backed by FrostDB.
+type Server = server.Server
+
+// NewServer creates a new TCP server listening on addr backed by db.
+func NewServer(addr string, db *DB) *Server {
+	return server.NewServer(addr, db)
+}
+
