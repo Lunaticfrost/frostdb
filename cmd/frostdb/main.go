@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/Lunaticfrost/frostdb/internal/engine"
 )
@@ -122,6 +123,8 @@ func handleCommand(store *engine.Store, line string) {
 		handleInfo(store)
 	case "SYNC":
 		handleSync(store)
+	case "COMPACT":
+		handleCompact(store)
 	case "HELP":
 		printHelp()
 	case "EXIT", "QUIT":
@@ -246,6 +249,40 @@ func handleSync(store *engine.Store) {
 	fmt.Println("OK - Synced to disk")
 }
 
+func handleCompact(store *engine.Store) {
+	if !store.IsPersistent() {
+		fmt.Println("Error: Compaction is only supported for persistent stores")
+		return
+	}
+
+	stats, err := store.Compact()
+	if err != nil {
+		fmt.Printf("Compaction error: %v\n", err)
+		return
+	}
+
+	fmt.Printf("OK - Compacted %d active key(s) in %s\n", stats.KeysCompacted, stats.Duration.Round(100*time.Microsecond))
+	fmt.Printf("Disk space: %s -> %s (reclaimed %s / %.1f%%)\n",
+		formatBytes(stats.BeforeBytes),
+		formatBytes(stats.AfterBytes),
+		formatBytes(stats.ReclaimedBytes),
+		stats.ReclaimedPct,
+	)
+}
+
+func formatBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
 func printHelp() {
 	help := `
 Available Commands:
@@ -257,6 +294,7 @@ Available Commands:
   SIZE               Show number of keys
   INFO               Show engine mode and statistics
   SYNC               Force flush pending writes to disk
+  COMPACT            Reclaim disk space by purging deleted/stale records
   CLEAR              Remove all keys
   HELP               Show this help message
   EXIT               Quit FrostDB
@@ -275,6 +313,9 @@ Examples:
   Mode:       Persistent
   Data Dir:   ./frostdata
   Total Keys: 2
+  frostdb> COMPACT
+  OK - Compacted 2 active key(s) in 800µs
+  Disk space: 142 B -> 84 B (reclaimed 58 B / 40.8%)
   frostdb> DELETE name
   OK
 `
