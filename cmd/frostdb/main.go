@@ -2,9 +2,12 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/Lunaticfrost/frostdb/internal/engine"
 )
@@ -17,14 +20,55 @@ const banner = `
  | |  | | | (_) \__ \| |_| |_| | |_) |
  |_|  |_|  \___/|___/ \__|____/|____/ 
                                       
-FrostDB v0.1.0 - Educational Key-Value Database
+FrostDB v0.2.0 - Embeddable Key-Value Store
 Type 'HELP' for available commands
 `
 
 func main() {
+	dataDir := flag.String("data-dir", "./frostdata", "Path to data directory for persistence")
+	flag.StringVar(dataDir, "d", "./frostdata", "Path to data directory for persistence (shorthand)")
+	inMemory := flag.Bool("in-memory", false, "Run in purely in-memory mode (no persistence)")
+	syncMode := flag.String("sync", "periodic", "Sync policy: 'always', 'periodic', or 'none'")
+	flag.Parse()
+
 	fmt.Print(banner)
 
-	store := engine.NewStore()
+	var store *engine.Store
+	var err error
+
+	if *inMemory {
+		store = engine.NewStore()
+		fmt.Println("Mode: In-Memory (data will not be persisted to disk)")
+	} else {
+		policy := engine.SyncPeriodic
+		switch strings.ToLower(*syncMode) {
+		case "always":
+			policy = engine.SyncAlways
+		case "none":
+			policy = engine.SyncNone
+		default:
+			policy = engine.SyncPeriodic
+		}
+
+		store, err = engine.Open(*dataDir, engine.Options{SyncPolicy: policy})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to initialize storage at %s: %v\n", *dataDir, err)
+			os.Exit(1)
+		}
+		fmt.Printf("Mode: Persistent [Dir: %s, Sync: %s, Keys Recovered: %d]\n", *dataDir, *syncMode, store.Size())
+	}
+	fmt.Println()
+
+	// Handle graceful shutdown on interrupt signals
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		fmt.Println("\nReceived shutdown signal. Flushing and exiting...")
+		_ = store.Close()
+		os.Exit(0)
+	}()
+
 	scanner := bufio.NewScanner(os.Stdin)
 
 	for {
@@ -44,8 +88,11 @@ func main() {
 
 	if err := scanner.Err(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
+		_ = store.Close()
 		os.Exit(1)
 	}
+
+	_ = store.Close()
 }
 
 func handleCommand(store *engine.Store, line string) {
@@ -71,9 +118,14 @@ func handleCommand(store *engine.Store, line string) {
 		handleClear(store)
 	case "SIZE":
 		handleSize(store)
+	case "INFO":
+		handleInfo(store)
+	case "SYNC":
+		handleSync(store)
 	case "HELP":
 		printHelp()
 	case "EXIT", "QUIT":
+		_ = store.Close()
 		fmt.Println("Goodbye! ❄️")
 		os.Exit(0)
 	default:
@@ -88,7 +140,6 @@ func handleSet(store *engine.Store, parts []string) {
 	}
 
 	key := parts[1]
-	// Join remaining parts as value (allows values with spaces)
 	value := strings.Join(parts[2:], " ")
 
 	err := store.Set(key, value)
@@ -172,6 +223,29 @@ func handleSize(store *engine.Store) {
 	fmt.Printf("%d key(s)\n", size)
 }
 
+func handleInfo(store *engine.Store) {
+	if store.IsPersistent() {
+		fmt.Printf("Mode:       Persistent\n")
+		fmt.Printf("Data Dir:   %s\n", store.DataDir())
+	} else {
+		fmt.Printf("Mode:       In-Memory\n")
+	}
+	fmt.Printf("Total Keys: %d\n", store.Size())
+}
+
+func handleSync(store *engine.Store) {
+	if !store.IsPersistent() {
+		fmt.Println("Store is in-memory only (sync not required)")
+		return
+	}
+
+	if err := store.Sync(); err != nil {
+		fmt.Printf("Sync error: %v\n", err)
+		return
+	}
+	fmt.Println("OK - Synced to disk")
+}
+
 func printHelp() {
 	help := `
 Available Commands:
@@ -181,6 +255,8 @@ Available Commands:
   EXISTS key         Check if key exists
   KEYS               List all keys
   SIZE               Show number of keys
+  INFO               Show engine mode and statistics
+  SYNC               Force flush pending writes to disk
   CLEAR              Remove all keys
   HELP               Show this help message
   EXIT               Quit FrostDB
@@ -195,10 +271,12 @@ Examples:
   frostdb> KEYS
   1) name
   2) greeting
+  frostdb> INFO
+  Mode:       Persistent
+  Data Dir:   ./frostdata
+  Total Keys: 2
   frostdb> DELETE name
   OK
-  frostdb> CLEAR
-  OK - All keys removed
 `
 	fmt.Println(help)
 }
