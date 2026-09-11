@@ -4,7 +4,7 @@
 *.dll
 *.so
 *.dylib
-frostdb
+/frostdb
 
 # Test binary
 *.test
