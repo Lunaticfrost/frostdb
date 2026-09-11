@@ -24,26 +24,35 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/Lunaticfrost/frostdb/internal/engine"
+	"github.com/Lunaticfrost/frostdb"
 )
 
 func main() {
-	db := engine.NewStore()
+	// Open or create a persistent database with 1-second background fsync
+	db, err := frostdb.Open("./frostdata", frostdb.DefaultOptions)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
 
-	// Write
-	if err := db.Set("session:user_123", "active"); err != nil {
+	// Binary-safe write
+	if err := db.Set("session:user_123", []byte("active")); err != nil {
 		log.Fatal(err)
 	}
 
-	// Read
+	// Binary-safe read
 	val, exists := db.Get("session:user_123")
 	if exists {
-		fmt.Printf("Session status: %s\n", val)
+		fmt.Printf("Session status: %s\n", string(val))
 	}
 
-	// Check & Delete
-	if db.Exists("session:user_123") {
-		db.Delete("session:user_123")
+	// Atomic multi-operation batch
+	batch := frostdb.NewWriteBatch()
+	batch.Set("k1", []byte("v1"))
+	batch.Set("k2", []byte("v2"))
+	batch.Delete("session:user_123")
+	if err := db.Write(batch); err != nil {
+		log.Fatal(err)
 	}
 }
 ```
@@ -138,7 +147,7 @@ go fmt ./...
 - [x] **Phase 1: In-memory KV Store** — Concurrent read/write primitives, test suite, and REPL CLI.
 - [x] **Phase 2: Persistence Engine** — WAL with binary record framing, CRC32 verification, configurable `fsync` policies, and automatic crash recovery.
 - [x] **Phase 3: Compaction & Space Reclamation** — Atomic log compaction, dead space recovery, and `COMPACT` CLI command.
-- [ ] **Phase 4: Public API & Byte Slices** — Expose top-level `pkg/frostdb` supporting `[]byte` values, batch operations, and file locking.
+- [x] **Phase 4: Public API & Byte Slices** — Root package API (`import "github.com/Lunaticfrost/frostdb"`), binary-safe `[]byte` values, atomic `WriteBatch`, and process file locking (`flock`).
 - [ ] **Phase 5: Client/Server Mode** — Optional standalone server speaking the Redis (RESP) protocol.
 
 ## License
