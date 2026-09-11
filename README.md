@@ -1,4 +1,10 @@
-# FrostDB
+# FrostDB ❄️
+
+[![Go Reference](https://pkg.go.dev/badge/github.com/Lunaticfrost/frostdb.svg)](https://pkg.go.dev/github.com/Lunaticfrost/frostdb)
+[![CI](https://github.com/Lunaticfrost/frostdb/actions/workflows/ci.yml/badge.svg)](https://github.com/Lunaticfrost/frostdb/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Lunaticfrost/frostdb?color=blue)](https://github.com/Lunaticfrost/frostdb/releases)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Lunaticfrost/frostdb)](https://goreportcard.com/report/github.com/Lunaticfrost/frostdb)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 FrostDB is an embeddable, thread-safe, pure-Go key-value store with write-ahead persistence and zero external dependencies.
 
