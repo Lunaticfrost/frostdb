@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // Options holds configuration settings for opening a persistent Store.
@@ -206,4 +207,103 @@ func (s *Store) Close() error {
 		return s.wal.Close()
 	}
 	return nil
+}
+
+// CompactionStats contains metrics produced by a log compaction run.
+type CompactionStats struct {
+	BeforeBytes    int64
+	AfterBytes     int64
+	ReclaimedBytes int64
+	ReclaimedPct   float64
+	KeysCompacted  int
+	Duration       time.Duration
+}
+
+// Compact reclaims disk space by writing active keys to a fresh WAL file
+// and atomically replacing the existing WAL via a POSIX rename.
+func (s *Store) Compact() (CompactionStats, error) {
+	start := time.Now()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.wal == nil {
+		return CompactionStats{}, fmt.Errorf("compaction is not supported for in-memory stores")
+	}
+
+	beforeSize, err := s.wal.FileSize()
+	if err != nil {
+		return CompactionStats{}, fmt.Errorf("failed to determine wal file size: %w", err)
+	}
+
+	walPath := s.wal.Path()
+	compactPath := filepath.Join(s.dataDir, "frost.wal.compact")
+
+	// Open a clean temporary WAL file with SyncAlways for durability during compaction
+	compactWAL, err := OpenWAL(compactPath, SyncAlways)
+	if err != nil {
+		return CompactionStats{}, fmt.Errorf("failed to open compact wal: %w", err)
+	}
+
+	// Write only currently active, live keys
+	var keysCount int
+	for k, v := range s.data {
+		rec := NewRecord(OpSet, k, v)
+		if err := compactWAL.Append(rec); err != nil {
+			_ = compactWAL.Close()
+			_ = os.Remove(compactPath)
+			return CompactionStats{}, fmt.Errorf("failed to write record during compaction: %w", err)
+		}
+		keysCount++
+	}
+
+	// Flush and close temporary compact WAL
+	if err := compactWAL.Close(); err != nil {
+		_ = os.Remove(compactPath)
+		return CompactionStats{}, fmt.Errorf("failed to close compact wal: %w", err)
+	}
+
+	// Close the current active WAL handle before replacing it
+	policy := s.wal.SyncPolicy()
+	if err := s.wal.Close(); err != nil {
+		_ = os.Remove(compactPath)
+		return CompactionStats{}, fmt.Errorf("failed to close active wal before swap: %w", err)
+	}
+
+	// Atomically replace the old WAL with the compacted WAL
+	if err := os.Rename(compactPath, walPath); err != nil {
+		reopenWAL, _ := OpenWAL(walPath, policy)
+		s.wal = reopenWAL
+		return CompactionStats{}, fmt.Errorf("failed to atomically replace wal file: %w", err)
+	}
+
+	// Re-open active WAL at the original path
+	newWAL, err := OpenWAL(walPath, policy)
+	if err != nil {
+		return CompactionStats{}, fmt.Errorf("failed to reopen wal after compaction: %w", err)
+	}
+	s.wal = newWAL
+
+	afterSize, err := s.wal.FileSize()
+	if err != nil {
+		afterSize = 0
+	}
+
+	reclaimed := beforeSize - afterSize
+	if reclaimed < 0 {
+		reclaimed = 0
+	}
+	var pct float64
+	if beforeSize > 0 {
+		pct = (float64(reclaimed) / float64(beforeSize)) * 100.0
+	}
+
+	return CompactionStats{
+		BeforeBytes:    beforeSize,
+		AfterBytes:     afterSize,
+		ReclaimedBytes: reclaimed,
+		ReclaimedPct:   pct,
+		KeysCompacted:  keysCount,
+		Duration:       time.Since(start),
+	}, nil
 }

@@ -203,3 +203,29 @@ func (w *WAL) Close() error {
 	}
 	return closeErr
 }
+
+// Path returns the filesystem path of the WAL file.
+func (w *WAL) Path() string {
+	return w.path
+}
+
+// SyncPolicy returns the configured sync policy of the WAL.
+func (w *WAL) SyncPolicy() SyncPolicy {
+	return w.syncPolicy
+}
+
+// FileSize returns the size of the WAL file in bytes on disk.
+func (w *WAL) FileSize() (int64, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.closed {
+		return 0, errors.New("wal is closed")
+	}
+
+	info, err := w.file.Stat()
+	if err != nil {
+		return 0, err
+	}
+	return info.Size(), nil
+}
