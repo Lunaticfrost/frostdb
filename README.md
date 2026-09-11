@@ -132,7 +132,7 @@ go fmt ./...
 ## Roadmap
 
 - [x] **Phase 1: In-memory KV Store** — Concurrent read/write primitives, test suite, and REPL CLI.
-- [ ] **Phase 2: Persistence Engine (In Progress)** — WAL with binary record framing, CRC32 verification, configurable `fsync` policies, and automatic crash recovery.
+- [x] **Phase 2: Persistence Engine** — WAL with binary record framing, CRC32 verification, configurable `fsync` policies, and automatic crash recovery.
 - [ ] **Phase 3: Compaction & KeyDir** — Log segment rotation, active file splitting, and background tombstone compaction.
 - [ ] **Phase 4: Public API & Byte Slices** — Expose top-level `pkg/frostdb` supporting `[]byte` values, batch operations, and file locking.
 - [ ] **Phase 5: Client/Server Mode** — Optional standalone server speaking the Redis (RESP) protocol.
