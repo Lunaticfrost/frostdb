@@ -107,6 +107,43 @@ func (w *WAL) Append(rec *Record) error {
 	return nil
 }
 
+// AppendBatch serializes and appends multiple records in a single sequential disk write,
+// followed by a single sync operation according to the sync policy.
+func (w *WAL) AppendBatch(records []*Record) error {
+	if len(records) == 0 {
+		return nil
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.closed {
+		return errors.New("wal is closed")
+	}
+
+	var batchBuf []byte
+	for _, rec := range records {
+		data, err := EncodeRecord(rec)
+		if err != nil {
+			return err
+		}
+		batchBuf = append(batchBuf, data...)
+	}
+
+	if _, err := w.file.Write(batchBuf); err != nil {
+		return fmt.Errorf("failed to write batch to wal: %w", err)
+	}
+
+	if w.syncPolicy == SyncAlways {
+		if err := w.file.Sync(); err != nil {
+			return fmt.Errorf("failed to sync wal to disk: %w", err)
+		}
+	}
+
+	return nil
+}
+
+
 // Replay reads the WAL from byte 0, invoking the handler for each valid record.
 // If a torn write is encountered at EOF (e.g. from an abrupt system crash),
 // it truncates the file back to the last valid byte offset and safely halts recovery.
