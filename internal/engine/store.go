@@ -20,21 +20,23 @@ var DefaultOptions = Options{
 
 // Store represents a thread-safe key-value store with optional WAL persistence.
 type Store struct {
-	data    map[string]string
+	data    map[string][]byte
 	mu      sync.RWMutex
 	wal     *WAL
 	dataDir string
+	flock   *FileLock
 }
 
 // NewStore creates a new in-memory Store instance without disk persistence.
 func NewStore() *Store {
 	return &Store{
-		data: make(map[string]string),
+		data: make(map[string][]byte),
 	}
 }
 
 // Open opens or creates a persistent database in dataDir.
-// It initializes the WAL and automatically replays existing records to restore state.
+// It acquires an exclusive process lock on frost.lock, initializes the WAL,
+// and automatically replays existing records to restore state.
 func Open(dataDir string, opts ...Options) (*Store, error) {
 	if dataDir == "" {
 		return nil, fmt.Errorf("data directory path cannot be empty")
@@ -49,16 +51,25 @@ func Open(dataDir string, opts ...Options) (*Store, error) {
 		return nil, fmt.Errorf("failed to create data directory: %w", err)
 	}
 
+	// Acquire process lock on the database directory
+	lockPath := filepath.Join(dataDir, "frost.lock")
+	flock, err := AcquireFileLock(lockPath)
+	if err != nil {
+		return nil, err
+	}
+
 	walPath := filepath.Join(dataDir, "frost.wal")
 	wal, err := OpenWAL(walPath, opt.SyncPolicy)
 	if err != nil {
+		_ = flock.Release()
 		return nil, fmt.Errorf("failed to initialize wal: %w", err)
 	}
 
 	store := &Store{
-		data:    make(map[string]string),
+		data:    make(map[string][]byte),
 		wal:     wal,
 		dataDir: dataDir,
+		flock:   flock,
 	}
 
 	// Replay existing log records to restore in-memory state
@@ -69,22 +80,23 @@ func Open(dataDir string, opts ...Options) (*Store, error) {
 		case OpDelete:
 			delete(store.data, rec.Key)
 		case OpClear:
-			store.data = make(map[string]string)
+			store.data = make(map[string][]byte)
 		}
 		return nil
 	})
 
 	if err != nil {
 		_ = wal.Close()
+		_ = flock.Release()
 		return nil, fmt.Errorf("failed during wal recovery: %w", err)
 	}
 
 	return store, nil
 }
 
-// Set stores a key-value pair. If persistence is enabled, the mutation is written
-// to the WAL before updating in-memory state.
-func (s *Store) Set(key, value string) error {
+// Set stores a key-value pair with binary-safe value. If persistence is enabled,
+// the mutation is written to the WAL before updating in-memory state.
+func (s *Store) Set(key string, value []byte) error {
 	if key == "" {
 		return fmt.Errorf("key cannot be empty")
 	}
@@ -99,17 +111,38 @@ func (s *Store) Set(key, value string) error {
 		}
 	}
 
-	s.data[key] = value
+	valCopy := make([]byte, len(value))
+	copy(valCopy, value)
+	s.data[key] = valCopy
 	return nil
 }
 
-// Get retrieves a value by key from the store.
-func (s *Store) Get(key string) (string, bool) {
+// SetString is a convenience helper for storing string values.
+func (s *Store) SetString(key, value string) error {
+	return s.Set(key, []byte(value))
+}
+
+// Get retrieves a binary value by key from the store.
+func (s *Store) Get(key string) ([]byte, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	value, exists := s.data[key]
-	return value, exists
+	if !exists {
+		return nil, false
+	}
+	valCopy := make([]byte, len(value))
+	copy(valCopy, value)
+	return valCopy, true
+}
+
+// GetString is a convenience helper for retrieving values as strings.
+func (s *Store) GetString(key string) (string, bool) {
+	val, exists := s.Get(key)
+	if !exists {
+		return "", false
+	}
+	return string(val), true
 }
 
 // Delete removes a key-value pair. If persistent, records a tombstone in the WAL.
@@ -123,7 +156,7 @@ func (s *Store) Delete(key string) bool {
 	}
 
 	if s.wal != nil {
-		rec := NewRecord(OpDelete, key, "")
+		rec := NewRecord(OpDelete, key, nil)
 		if err := s.wal.Append(rec); err != nil {
 			return false
 		}
@@ -131,6 +164,43 @@ func (s *Store) Delete(key string) bool {
 
 	delete(s.data, key)
 	return true
+}
+
+// Write applies all mutations in a WriteBatch atomically to disk and memory.
+func (s *Store) Write(batch *WriteBatch) error {
+	if batch == nil || len(batch.ops) == 0 {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// 1. Write all batch records to WAL in a single disk operation
+	if s.wal != nil {
+		records := make([]*Record, 0, len(batch.ops))
+		for _, op := range batch.ops {
+			records = append(records, NewRecord(op.op, op.key, op.value))
+		}
+		if err := s.wal.AppendBatch(records); err != nil {
+			return fmt.Errorf("failed to write batch to wal: %w", err)
+		}
+	}
+
+	// 2. Apply all mutations to in-memory state
+	for _, op := range batch.ops {
+		switch op.op {
+		case OpSet:
+			valCopy := make([]byte, len(op.value))
+			copy(valCopy, op.value)
+			s.data[op.key] = valCopy
+		case OpDelete:
+			delete(s.data, op.key)
+		case OpClear:
+			s.data = make(map[string][]byte)
+		}
+	}
+
+	return nil
 }
 
 // Exists checks if a key exists in the store.
@@ -160,11 +230,11 @@ func (s *Store) Clear() {
 	defer s.mu.Unlock()
 
 	if s.wal != nil {
-		rec := NewRecord(OpClear, "", "")
+		rec := NewRecord(OpClear, "", nil)
 		_ = s.wal.Append(rec)
 	}
 
-	s.data = make(map[string]string)
+	s.data = make(map[string][]byte)
 }
 
 // Size returns the number of key-value pairs in the store.
@@ -198,15 +268,27 @@ func (s *Store) Sync() error {
 	return nil
 }
 
-// Close gracefully flushes pending writes and releases file handles.
+// Close gracefully flushes pending writes and releases file handles and locks.
 func (s *Store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	var walErr error
 	if s.wal != nil {
-		return s.wal.Close()
+		walErr = s.wal.Close()
+		s.wal = nil
 	}
-	return nil
+
+	var lockErr error
+	if s.flock != nil {
+		lockErr = s.flock.Release()
+		s.flock = nil
+	}
+
+	if walErr != nil {
+		return walErr
+	}
+	return lockErr
 }
 
 // CompactionStats contains metrics produced by a log compaction run.

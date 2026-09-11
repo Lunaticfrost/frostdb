@@ -46,11 +46,11 @@ type Record struct {
 	Timestamp uint64
 	Op        OpType
 	Key       string
-	Value     string
+	Value     []byte
 }
 
 // NewRecord creates a new Record instance stamped with the current UTC timestamp.
-func NewRecord(op OpType, key, value string) *Record {
+func NewRecord(op OpType, key string, value []byte) *Record {
 	return &Record{
 		Timestamp: uint64(time.Now().UnixNano()),
 		Op:        op,
@@ -67,7 +67,7 @@ func NewRecord(op OpType, key, value string) *Record {
 // +----------------+-------------------+---------------+------------------+------------------+---------------+-----------------+
 func EncodeRecord(rec *Record) ([]byte, error) {
 	keyBytes := []byte(rec.Key)
-	valBytes := []byte(rec.Value)
+	valBytes := rec.Value
 
 	if len(keyBytes) > MaxKeySize {
 		return nil, ErrKeyTooLarge
@@ -135,7 +135,8 @@ func DecodeRecord(r io.Reader) (*Record, error) {
 	}
 
 	key := string(body[:keyLen])
-	value := string(body[keyLen:])
+	value := make([]byte, valLen)
+	copy(value, body[keyLen:])
 
 	return &Record{
 		CRC:       expectedCRC,

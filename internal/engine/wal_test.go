@@ -10,7 +10,7 @@ import (
 )
 
 func TestRecordEncodeDecode(t *testing.T) {
-	rec := NewRecord(OpSet, "user:1", "Alice")
+	rec := NewRecord(OpSet, "user:1", []byte("Alice"))
 	data, err := EncodeRecord(rec)
 	if err != nil {
 		t.Fatalf("EncodeRecord failed: %v", err)
@@ -27,7 +27,7 @@ func TestRecordEncodeDecode(t *testing.T) {
 	if decoded.Key != rec.Key {
 		t.Errorf("expected Key %q, got %q", rec.Key, decoded.Key)
 	}
-	if decoded.Value != rec.Value {
+	if !bytes.Equal(decoded.Value, rec.Value) {
 		t.Errorf("expected Value %q, got %q", rec.Value, decoded.Value)
 	}
 	if decoded.CRC != rec.CRC {
@@ -36,7 +36,7 @@ func TestRecordEncodeDecode(t *testing.T) {
 }
 
 func TestRecordCorruption(t *testing.T) {
-	rec := NewRecord(OpSet, "key", "value")
+	rec := NewRecord(OpSet, "key", []byte("value"))
 	data, err := EncodeRecord(rec)
 	if err != nil {
 		t.Fatalf("EncodeRecord failed: %v", err)
@@ -60,9 +60,9 @@ func TestWALAppendAndReplay(t *testing.T) {
 		t.Fatalf("OpenWAL failed: %v", err)
 	}
 
-	rec1 := NewRecord(OpSet, "k1", "v1")
-	rec2 := NewRecord(OpSet, "k2", "v2")
-	rec3 := NewRecord(OpDelete, "k1", "")
+	rec1 := NewRecord(OpSet, "k1", []byte("v1"))
+	rec2 := NewRecord(OpSet, "k2", []byte("v2"))
+	rec3 := NewRecord(OpDelete, "k1", nil)
 
 	if err := wal.Append(rec1); err != nil {
 		t.Fatalf("Append rec1 failed: %v", err)
@@ -86,10 +86,10 @@ func TestWALAppendAndReplay(t *testing.T) {
 		t.Fatalf("expected 3 records, got %d", count)
 	}
 
-	if replayed[0].Key != "k1" || replayed[0].Value != "v1" || replayed[0].Op != OpSet {
+	if replayed[0].Key != "k1" || string(replayed[0].Value) != "v1" || replayed[0].Op != OpSet {
 		t.Errorf("unexpected record 0: %+v", replayed[0])
 	}
-	if replayed[1].Key != "k2" || replayed[1].Value != "v2" || replayed[1].Op != OpSet {
+	if replayed[1].Key != "k2" || string(replayed[1].Value) != "v2" || replayed[1].Op != OpSet {
 		t.Errorf("unexpected record 1: %+v", replayed[1])
 	}
 	if replayed[2].Key != "k1" || replayed[2].Op != OpDelete {
@@ -109,8 +109,8 @@ func TestWALTornWriteRecovery(t *testing.T) {
 	}
 
 	// Write 2 valid records
-	_ = wal.Append(NewRecord(OpSet, "k1", "v1"))
-	_ = wal.Append(NewRecord(OpSet, "k2", "v2"))
+	_ = wal.Append(NewRecord(OpSet, "k1", []byte("v1")))
+	_ = wal.Append(NewRecord(OpSet, "k2", []byte("v2")))
 	_ = wal.Close()
 
 	// Append corrupt / partial bytes to simulate crash mid-write
@@ -142,7 +142,7 @@ func TestWALTornWriteRecovery(t *testing.T) {
 	}
 
 	// Verify we can continue appending after truncation
-	err = wal2.Append(NewRecord(OpSet, "k3", "v3"))
+	err = wal2.Append(NewRecord(OpSet, "k3", []byte("v3")))
 	if err != nil {
 		t.Fatalf("Append after torn recovery failed: %v", err)
 	}
@@ -173,9 +173,9 @@ func TestStorePersistenceAcrossRestarts(t *testing.T) {
 		t.Error("expected db1 to be persistent")
 	}
 
-	_ = db1.Set("city", "Reykjavik")
-	_ = db1.Set("temp", "-5")
-	_ = db1.Set("to_delete", "temporary")
+	_ = db1.Set("city", []byte("Reykjavik"))
+	_ = db1.Set("temp", []byte("-5"))
+	_ = db1.Set("to_delete", []byte("temporary"))
 	db1.Delete("to_delete")
 
 	if err := db1.Close(); err != nil {
@@ -194,13 +194,13 @@ func TestStorePersistenceAcrossRestarts(t *testing.T) {
 	}
 
 	city, exists := db2.Get("city")
-	if !exists || city != "Reykjavik" {
-		t.Errorf("expected 'Reykjavik', got %q (exists=%v)", city, exists)
+	if !exists || string(city) != "Reykjavik" {
+		t.Errorf("expected 'Reykjavik', got %q (exists=%v)", string(city), exists)
 	}
 
 	temp, exists := db2.Get("temp")
-	if !exists || temp != "-5" {
-		t.Errorf("expected '-5', got %q (exists=%v)", temp, exists)
+	if !exists || string(temp) != "-5" {
+		t.Errorf("expected '-5', got %q (exists=%v)", string(temp), exists)
 	}
 
 	if db2.Exists("to_delete") {
@@ -227,7 +227,7 @@ func TestStoreConcurrentWritesWithWAL(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < opsPerWorker; j++ {
 				key := fmt.Sprintf("k-%d-%d", workerID, j)
-				val := fmt.Sprintf("v-%d-%d", workerID, j)
+				val := []byte(fmt.Sprintf("v-%d-%d", workerID, j))
 				if err := db.Set(key, val); err != nil {
 					t.Errorf("Set failed: %v", err)
 				}

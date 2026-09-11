@@ -18,7 +18,7 @@ func TestStoreCompactionSpaceReclaimed(t *testing.T) {
 	for round := 0; round < 5; round++ {
 		for i := 0; i < 100; i++ {
 			key := fmt.Sprintf("user:%d", i)
-			val := fmt.Sprintf("data-round-%d-value-%d", round, i)
+			val := []byte(fmt.Sprintf("data-round-%d-value-%d", round, i))
 			if err := db.Set(key, val); err != nil {
 				t.Fatalf("Set failed: %v", err)
 			}
@@ -79,8 +79,8 @@ func TestStoreCompactionSpaceReclaimed(t *testing.T) {
 			t.Errorf("key %s should exist", key)
 		}
 		expected := fmt.Sprintf("data-round-4-value-%d", i)
-		if val != expected {
-			t.Errorf("key %s expected %q, got %q", key, expected, val)
+		if string(val) != expected {
+			t.Errorf("key %s expected %q, got %q", key, expected, string(val))
 		}
 	}
 }
@@ -94,9 +94,9 @@ func TestStoreCompactionRecovery(t *testing.T) {
 		t.Fatalf("Open db1 failed: %v", err)
 	}
 
-	_ = db1.Set("city", "Oslo")
-	_ = db1.Set("country", "Norway")
-	_ = db1.Set("temp", "-10")
+	_ = db1.Set("city", []byte("Oslo"))
+	_ = db1.Set("country", []byte("Norway"))
+	_ = db1.Set("temp", []byte("-10"))
 	db1.Delete("temp")
 
 	_, err = db1.Compact()
@@ -119,11 +119,11 @@ func TestStoreCompactionRecovery(t *testing.T) {
 		t.Errorf("expected size 2, got %d", db2.Size())
 	}
 
-	if val, ok := db2.Get("city"); !ok || val != "Oslo" {
-		t.Errorf("expected 'Oslo', got %q", val)
+	if val, ok := db2.Get("city"); !ok || string(val) != "Oslo" {
+		t.Errorf("expected 'Oslo', got %q", string(val))
 	}
-	if val, ok := db2.Get("country"); !ok || val != "Norway" {
-		t.Errorf("expected 'Norway', got %q", val)
+	if val, ok := db2.Get("country"); !ok || string(val) != "Norway" {
+		t.Errorf("expected 'Norway', got %q", string(val))
 	}
 	if db2.Exists("temp") {
 		t.Error("deleted key 'temp' should not exist")

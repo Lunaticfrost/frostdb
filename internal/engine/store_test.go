@@ -19,7 +19,7 @@ func TestNewStore(t *testing.T) {
 func TestSetAndGet(t *testing.T) {
 	store := NewStore()
 
-	err := store.Set("name", "Alice")
+	err := store.Set("name", []byte("Alice"))
 	if err != nil {
 		t.Fatalf("Set failed: %v", err)
 	}
@@ -28,15 +28,22 @@ func TestSetAndGet(t *testing.T) {
 	if !exists {
 		t.Fatal("Key should exist")
 	}
-	if value != "Alice" {
-		t.Errorf("Expected 'Alice', got '%s'", value)
+	if string(value) != "Alice" {
+		t.Errorf("Expected 'Alice', got '%s'", string(value))
+	}
+
+	// Test SetString / GetString convenience helpers
+	_ = store.SetString("greeting", "Hello World")
+	strVal, exists := store.GetString("greeting")
+	if !exists || strVal != "Hello World" {
+		t.Errorf("Expected 'Hello World', got %q", strVal)
 	}
 }
 
 func TestSetEmptyKey(t *testing.T) {
 	store := NewStore()
 
-	err := store.Set("", "value")
+	err := store.Set("", []byte("value"))
 	if err == nil {
 		t.Error("Setting empty key should return error")
 	}
@@ -54,7 +61,7 @@ func TestGetNonExistentKey(t *testing.T) {
 func TestDelete(t *testing.T) {
 	store := NewStore()
 
-	store.Set("name", "Bob")
+	_ = store.Set("name", []byte("Bob"))
 	deleted := store.Delete("name")
 	if !deleted {
 		t.Error("Delete should return true for existing key")
@@ -78,7 +85,7 @@ func TestExists(t *testing.T) {
 		t.Error("Key should not exist initially")
 	}
 
-	store.Set("test", "value")
+	_ = store.Set("test", []byte("value"))
 	if !store.Exists("test") {
 		t.Error("Key should exist after Set")
 	}
@@ -97,9 +104,9 @@ func TestKeys(t *testing.T) {
 		t.Errorf("Empty store should have 0 keys, got %d", len(keys))
 	}
 
-	store.Set("key1", "value1")
-	store.Set("key2", "value2")
-	store.Set("key3", "value3")
+	_ = store.Set("key1", []byte("value1"))
+	_ = store.Set("key2", []byte("value2"))
+	_ = store.Set("key3", []byte("value3"))
 
 	keys = store.Keys()
 	if len(keys) != 3 {
@@ -123,8 +130,8 @@ func TestKeys(t *testing.T) {
 func TestClear(t *testing.T) {
 	store := NewStore()
 
-	store.Set("key1", "value1")
-	store.Set("key2", "value2")
+	_ = store.Set("key1", []byte("value1"))
+	_ = store.Set("key2", []byte("value2"))
 
 	if store.Size() != 2 {
 		t.Errorf("Expected size 2, got %d", store.Size())
@@ -148,12 +155,12 @@ func TestSize(t *testing.T) {
 		t.Errorf("Expected size 0, got %d", store.Size())
 	}
 
-	store.Set("key1", "value1")
+	_ = store.Set("key1", []byte("value1"))
 	if store.Size() != 1 {
 		t.Errorf("Expected size 1, got %d", store.Size())
 	}
 
-	store.Set("key2", "value2")
+	_ = store.Set("key2", []byte("value2"))
 	if store.Size() != 2 {
 		t.Errorf("Expected size 2, got %d", store.Size())
 	}
@@ -167,16 +174,16 @@ func TestSize(t *testing.T) {
 func TestOverwriteValue(t *testing.T) {
 	store := NewStore()
 
-	store.Set("key", "value1")
+	_ = store.Set("key", []byte("value1"))
 	value, _ := store.Get("key")
-	if value != "value1" {
-		t.Errorf("Expected 'value1', got '%s'", value)
+	if string(value) != "value1" {
+		t.Errorf("Expected 'value1', got '%s'", string(value))
 	}
 
-	store.Set("key", "value2")
+	_ = store.Set("key", []byte("value2"))
 	value, _ = store.Get("key")
-	if value != "value2" {
-		t.Errorf("Expected 'value2', got '%s'", value)
+	if string(value) != "value2" {
+		t.Errorf("Expected 'value2', got '%s'", string(value))
 	}
 
 	if store.Size() != 1 {
@@ -198,8 +205,8 @@ func TestConcurrentWrites(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < writesPerGoroutine; j++ {
 				key := fmt.Sprintf("key-%d-%d", id, j)
-				value := fmt.Sprintf("value-%d-%d", id, j)
-				store.Set(key, value)
+				value := []byte(fmt.Sprintf("value-%d-%d", id, j))
+				_ = store.Set(key, value)
 			}
 		}(i)
 	}
@@ -218,7 +225,7 @@ func TestConcurrentReads(t *testing.T) {
 
 	// Populate store
 	for i := 0; i < 100; i++ {
-		store.Set(fmt.Sprintf("key-%d", i), fmt.Sprintf("value-%d", i))
+		_ = store.Set(fmt.Sprintf("key-%d", i), []byte(fmt.Sprintf("value-%d", i)))
 	}
 
 	var wg sync.WaitGroup
@@ -235,8 +242,8 @@ func TestConcurrentReads(t *testing.T) {
 					t.Errorf("Key %s should exist", key)
 				}
 				expectedValue := fmt.Sprintf("value-%d", j)
-				if value != expectedValue {
-					t.Errorf("Expected %s, got %s", expectedValue, value)
+				if string(value) != expectedValue {
+					t.Errorf("Expected %s, got %s", expectedValue, string(value))
 				}
 			}
 		}(i)
@@ -257,8 +264,8 @@ func TestConcurrentReadWrite(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < 100; j++ {
 				key := fmt.Sprintf("key-%d", j)
-				value := fmt.Sprintf("value-%d-%d", id, j)
-				store.Set(key, value)
+				value := []byte(fmt.Sprintf("value-%d-%d", id, j))
+				_ = store.Set(key, value)
 			}
 		}(i)
 	}
@@ -290,8 +297,8 @@ func BenchmarkSet(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		key := fmt.Sprintf("key-%d", i)
-		value := fmt.Sprintf("value-%d", i)
-		store.Set(key, value)
+		value := []byte(fmt.Sprintf("value-%d", i))
+		_ = store.Set(key, value)
 	}
 }
 
@@ -300,7 +307,7 @@ func BenchmarkGet(b *testing.B) {
 
 	// Populate store
 	for i := 0; i < 10000; i++ {
-		store.Set(fmt.Sprintf("key-%d", i), fmt.Sprintf("value-%d", i))
+		_ = store.Set(fmt.Sprintf("key-%d", i), []byte(fmt.Sprintf("value-%d", i)))
 	}
 
 	b.ResetTimer()
@@ -319,8 +326,8 @@ func BenchmarkConcurrentSet(b *testing.B) {
 		i := 0
 		for pb.Next() {
 			key := fmt.Sprintf("key-%d", i)
-			value := fmt.Sprintf("value-%d", i)
-			store.Set(key, value)
+			value := []byte(fmt.Sprintf("value-%d", i))
+			_ = store.Set(key, value)
 			i++
 		}
 	})
@@ -331,7 +338,7 @@ func BenchmarkConcurrentGet(b *testing.B) {
 
 	// Populate store
 	for i := 0; i < 10000; i++ {
-		store.Set(fmt.Sprintf("key-%d", i), fmt.Sprintf("value-%d", i))
+		_ = store.Set(fmt.Sprintf("key-%d", i), []byte(fmt.Sprintf("value-%d", i)))
 	}
 
 	b.ResetTimer()
