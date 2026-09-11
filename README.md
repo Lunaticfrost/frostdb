@@ -83,6 +83,9 @@ Goodbye! ❄️
 | `EXISTS` | `EXISTS <key>` | Check if a key exists |
 | `KEYS` | `KEYS` | List all stored keys |
 | `SIZE` | `SIZE` | Return total count of keys |
+| `INFO` | `INFO` | Display storage mode, data directory, and key count |
+| `SYNC` | `SYNC` | Force fsync all pending writes to disk |
+| `COMPACT` | `COMPACT` | Reclaim disk space by purging overwritten and deleted records |
 | `CLEAR` | `CLEAR` | Remove all stored entries |
 | `HELP` | `HELP` | Show command reference |
 | `EXIT` / `QUIT` | `EXIT` | Close session |
@@ -108,6 +111,7 @@ FrostDB combines an in-memory index with an append-only persistence layer:
 1. **Writes (`SET` / `DELETE`)**: Appended sequentially to the log on disk with a CRC32 checksum and synced according to the configured durability policy. The in-memory map updates immediately.
 2. **Reads (`GET`)**: Served from memory in $O(1)$ time without disk seeks.
 3. **Crash Recovery**: On boot, the log file is read sequentially. Records with valid checksums are replayed into memory. Incomplete or torn writes from sudden power cuts are detected and discarded.
+4. **Log Compaction**: Running `COMPACT` takes a snapshot of active keys, writes them to a temporary WAL, and performs an atomic POSIX rename (`os.Rename`), purging all stale historical updates and tombstones without downtime.
 
 ## Development
 
@@ -133,7 +137,7 @@ go fmt ./...
 
 - [x] **Phase 1: In-memory KV Store** — Concurrent read/write primitives, test suite, and REPL CLI.
 - [x] **Phase 2: Persistence Engine** — WAL with binary record framing, CRC32 verification, configurable `fsync` policies, and automatic crash recovery.
-- [ ] **Phase 3: Compaction & KeyDir** — Log segment rotation, active file splitting, and background tombstone compaction.
+- [x] **Phase 3: Compaction & Space Reclamation** — Atomic log compaction, dead space recovery, and `COMPACT` CLI command.
 - [ ] **Phase 4: Public API & Byte Slices** — Expose top-level `pkg/frostdb` supporting `[]byte` values, batch operations, and file locking.
 - [ ] **Phase 5: Client/Server Mode** — Optional standalone server speaking the Redis (RESP) protocol.
 
