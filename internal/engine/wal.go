@@ -39,9 +39,16 @@ type WAL struct {
 
 // OpenWAL opens or creates a WAL file at the given path with the specified sync policy.
 func OpenWAL(path string, syncPolicy SyncPolicy) (*WAL, error) {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
+	// Note: We omit os.O_APPEND so that Truncate() is permitted on Windows
+	// (Go on Windows strips GENERIC_WRITE when O_APPEND is used, causing ERROR_ACCESS_DENIED on SetEndOfFile).
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open wal file: %w", err)
+	}
+
+	if _, err := file.Seek(0, io.SeekEnd); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("failed to seek to end of wal file: %w", err)
 	}
 
 	w := &WAL{
