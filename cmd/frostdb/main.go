@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -10,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Lunaticfrost/frostdb/internal/engine"
+	"github.com/Lunaticfrost/frostdb"
 )
 
 const banner = `
@@ -21,7 +22,7 @@ const banner = `
  | |  | | | (_) \__ \| |_| |_| | |_) |
  |_|  |_|  \___/|___/ \__|____/|____/ 
                                       
-FrostDB v0.2.0 - Embeddable Key-Value Store
+FrostDB v0.3.0 - Embeddable Key-Value Database
 Type 'HELP' for available commands
 `
 
@@ -34,26 +35,30 @@ func main() {
 
 	fmt.Print(banner)
 
-	var store *engine.Store
+	var store *frostdb.DB
 	var err error
 
 	if *inMemory {
-		store = engine.NewStore()
+		store = frostdb.New()
 		fmt.Println("Mode: In-Memory (data will not be persisted to disk)")
 	} else {
-		policy := engine.SyncPeriodic
+		policy := frostdb.SyncPeriodic
 		switch strings.ToLower(*syncMode) {
 		case "always":
-			policy = engine.SyncAlways
+			policy = frostdb.SyncAlways
 		case "none":
-			policy = engine.SyncNone
+			policy = frostdb.SyncNone
 		default:
-			policy = engine.SyncPeriodic
+			policy = frostdb.SyncPeriodic
 		}
 
-		store, err = engine.Open(*dataDir, engine.Options{SyncPolicy: policy})
+		store, err = frostdb.Open(*dataDir, frostdb.Options{SyncPolicy: policy})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to initialize storage at %s: %v\n", *dataDir, err)
+			if errors.Is(err, frostdb.ErrDatabaseLocked) {
+				fmt.Fprintf(os.Stderr, "Error: database at %s is locked by another running process\n", *dataDir)
+			} else {
+				fmt.Fprintf(os.Stderr, "Failed to initialize storage at %s: %v\n", *dataDir, err)
+			}
 			os.Exit(1)
 		}
 		fmt.Printf("Mode: Persistent [Dir: %s, Sync: %s, Keys Recovered: %d]\n", *dataDir, *syncMode, store.Size())
@@ -96,7 +101,7 @@ func main() {
 	_ = store.Close()
 }
 
-func handleCommand(store *engine.Store, line string) {
+func handleCommand(store *frostdb.DB, line string) {
 	parts := strings.Fields(line)
 	if len(parts) == 0 {
 		return
@@ -136,7 +141,7 @@ func handleCommand(store *engine.Store, line string) {
 	}
 }
 
-func handleSet(store *engine.Store, parts []string) {
+func handleSet(store *frostdb.DB, parts []string) {
 	if len(parts) < 3 {
 		fmt.Println("Usage: SET key value")
 		return
@@ -145,7 +150,7 @@ func handleSet(store *engine.Store, parts []string) {
 	key := parts[1]
 	value := strings.Join(parts[2:], " ")
 
-	err := store.Set(key, value)
+	err := store.SetString(key, value)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return
@@ -154,14 +159,14 @@ func handleSet(store *engine.Store, parts []string) {
 	fmt.Println("OK")
 }
 
-func handleGet(store *engine.Store, parts []string) {
+func handleGet(store *frostdb.DB, parts []string) {
 	if len(parts) != 2 {
 		fmt.Println("Usage: GET key")
 		return
 	}
 
 	key := parts[1]
-	value, exists := store.Get(key)
+	value, exists := store.GetString(key)
 
 	if !exists {
 		fmt.Println("(nil)")
@@ -171,7 +176,7 @@ func handleGet(store *engine.Store, parts []string) {
 	fmt.Println(value)
 }
 
-func handleDelete(store *engine.Store, parts []string) {
+func handleDelete(store *frostdb.DB, parts []string) {
 	if len(parts) != 2 {
 		fmt.Println("Usage: DELETE key")
 		return
@@ -187,7 +192,7 @@ func handleDelete(store *engine.Store, parts []string) {
 	}
 }
 
-func handleExists(store *engine.Store, parts []string) {
+func handleExists(store *frostdb.DB, parts []string) {
 	if len(parts) != 2 {
 		fmt.Println("Usage: EXISTS key")
 		return
@@ -203,7 +208,7 @@ func handleExists(store *engine.Store, parts []string) {
 	}
 }
 
-func handleKeys(store *engine.Store) {
+func handleKeys(store *frostdb.DB) {
 	keys := store.Keys()
 
 	if len(keys) == 0 {
@@ -216,17 +221,17 @@ func handleKeys(store *engine.Store) {
 	}
 }
 
-func handleClear(store *engine.Store) {
+func handleClear(store *frostdb.DB) {
 	store.Clear()
 	fmt.Println("OK - All keys removed")
 }
 
-func handleSize(store *engine.Store) {
+func handleSize(store *frostdb.DB) {
 	size := store.Size()
 	fmt.Printf("%d key(s)\n", size)
 }
 
-func handleInfo(store *engine.Store) {
+func handleInfo(store *frostdb.DB) {
 	if store.IsPersistent() {
 		fmt.Printf("Mode:       Persistent\n")
 		fmt.Printf("Data Dir:   %s\n", store.DataDir())
@@ -236,7 +241,7 @@ func handleInfo(store *engine.Store) {
 	fmt.Printf("Total Keys: %d\n", store.Size())
 }
 
-func handleSync(store *engine.Store) {
+func handleSync(store *frostdb.DB) {
 	if !store.IsPersistent() {
 		fmt.Println("Store is in-memory only (sync not required)")
 		return
@@ -249,7 +254,7 @@ func handleSync(store *engine.Store) {
 	fmt.Println("OK - Synced to disk")
 }
 
-func handleCompact(store *engine.Store) {
+func handleCompact(store *frostdb.DB) {
 	if !store.IsPersistent() {
 		fmt.Println("Error: Compaction is only supported for persistent stores")
 		return
