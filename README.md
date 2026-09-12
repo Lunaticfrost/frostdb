@@ -16,8 +16,10 @@ It is designed to be imported directly into Go applications that need durable, f
 - **Embeddable**: Run it directly in-process via `import "github.com/Lunaticfrost/frostdb"`.
 - **Durable**: Append-only write-ahead log (WAL) with binary framing and CRC32 checksums for crash safety.
 - **Thread-safe**: Concurrency control via reader-writer locks (`sync.RWMutex`).
-- **Interactive CLI**: Standalone REPL binary for testing and manual inspection.
+- **Interactive CLI & Redis Server**: Standalone REPL binary and streaming Redis RESP2 TCP server.
 - **Zero Dependencies**: Standard library only.
+
+📖 *Curious about the engine design, binary framing, or zero-downtime compaction? Read the [FrostDB Internals Guide](docs/INTERNALS.md).*
 
 ## Quick Start
 
